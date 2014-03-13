@@ -26,14 +26,21 @@ class ScopedClient
 
       port = @options.port ||
         ScopedClient.defaultPort[@options.protocol] || 80
-      req = (if @options.protocol == 'https:' then https else http).request(
-        port:    port
-        host:    @options.hostname
-        method:  method
-        path:    @fullPath()
+
+      requestOptions =
+        port: port
+        host: @options.hostname
+        method: method
+        path: @fullPath()
         headers: headers
-        agent:   @options.agent or false
-      )
+        agent: @options.agent or false
+
+      if @proxy(@options.protocol) and !@whiteListed(@options.hostname).length
+        requestOptions.port = @proxyPort @options.protocol
+        requestOptions.host = @proxyHost @options.protocol
+        requestOptions.path = "#{@options.protocol}//#{@options.hostname}#{@fullPath()}"
+
+      req = (if @options.protocol == 'https:' then https else http).request requestOptions
       if callback
         req.on 'error', callback
       req.write reqBody, @options.encoding if sendingData
@@ -153,6 +160,20 @@ class ScopedClient
     options.headers ||= {}
     options.encoding ?= 'utf-8'
     options
+
+  proxy: (protocol) ->
+    name = /^([^:]+)/.exec(protocol)[1]
+    process.env["#{name}_proxy"]
+
+  proxyPort: (protocol) ->
+    /[^:]+:[^:]+:(\d+)$/.exec(@proxy(protocol))[1]
+
+  proxyHost: (protocol) ->
+    /[^:]+:\/\/([^:]+):\d+$/.exec(@proxy(protocol))[1]
+
+  whiteListed: (hostname) ->
+    whiteList = process.env.no_proxy && process.env.no_proxy.split(',')
+    whiteList && whiteList.filter (element) -> (hostname.search(element)) >= 0
 
 ScopedClient.methods = ["GET", "POST", "PATCH", "PUT", "DELETE", "HEAD"]
 ScopedClient.methods.forEach (method) ->
